@@ -218,7 +218,6 @@ Register-ArgumentCompleter -CommandName bw -ScriptBlock {
     }
 
     $InformationPreference = 'Continue'
-    $ConsoleWidth = $Host.UI.RawUI.BufferSize.Width - 2
 
     # trim off the command name and the $WordToComplete
     $ArgumentsList = $CommandAst -replace '^bw(.exe)?\s+' -replace "\s+$WordToComplete$"
