@@ -275,3 +275,57 @@ Register-ArgumentCompleter -CommandName bw -ScriptBlock {
         Where-Object { $_ -like "$WordToComplete*" }
 
 }
+
+<#
+.SYNOPSIS
+ Select a credential from those returned from the Bitwarden CLI
+
+.DESCRIPTION
+ Select a credential from those returned from the Bitwarden CLI
+#>
+function Select-BWCredential {
+
+    param(
+
+        [Parameter( Mandatory = $true, ValueFromPipeline = $true )]
+        [pscustomobject[]]
+        $BitwardenItems
+
+    )
+
+    begin {
+
+        [System.Collections.ArrayList]$LoginItems = @()
+
+    }
+
+    process {
+
+        $BitwardenItems.Where({ $_.login }) | ForEach-Object { $LoginItems.Add($_) > $null }
+
+    }
+
+    end {
+
+        if ( $LoginItems.Count -eq 0 ) {
+
+            Write-Warning 'No login found!'
+            return
+
+        }
+
+        if ( $LoginItems.Count -eq 1 ) {
+
+            return $LoginItems.login.Credential
+
+        }
+
+        $SelectedItem = $LoginItems |
+            Select-Object Id, Name, @{N='UserName';E={$_.login.username}}, @{N='PrimaryURI';E={$_.login.uris[0].uri}} |
+            Out-GridView -Title 'Choose Login' -OutputMode Single
+
+        return $LoginItems.Where({ $_.Id -eq $SelectedItem.Id }).login.Credential
+
+    }
+
+}
