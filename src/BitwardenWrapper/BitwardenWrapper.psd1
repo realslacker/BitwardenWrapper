@@ -12,7 +12,7 @@
 RootModule = 'BitwardenWrapper.psm1'
 
 # Version number of this module.
-ModuleVersion = '21.7.1.1044'
+ModuleVersion = '21.7.2.1338'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()

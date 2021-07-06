@@ -23,6 +23,48 @@ if ( $BitwardenCLI -and $BitwardenCLI.Version -lt $SupportedVersion ) {
 
 }
 
+enum BitwardenMfaMethod {
+    Authenticator   = 0
+    Email           = 1
+    Yubikey         = 2
+}
+
+enum BitwardenItemType {
+    Undefined       = 0
+    Login           = 1
+    SecureNote      = 2
+    Card            = 3
+    Identity        = 4
+}
+
+enum BitwardenUriMatchType {
+    Domain          = 0
+    Host            = 1
+    StartsWith      = 2
+    Exact           = 3
+    Regex           = 4
+    Never           = 5
+}
+
+enum BitwardenFieldType {
+    Text            = 0
+    Hidden          = 1
+    Boolean         = 2
+}
+
+enum BitwardenOrganizationUserType {
+    Owner           = 0
+    Admin           = 1
+    User            = 2
+    Manager         = 3
+}
+
+enum BitwardenOrganizationUserStatus {
+    Invited         = 0
+    Accepted        = 1
+    Confirmed       = 2
+}
+
 <#
 .SYNOPSIS
  Helper function to install bw.exe to $env:windir\system32
@@ -95,9 +137,11 @@ function bw {
 
     [string[]]$Result = & $BitwardenCLI @ArgumentsList
 
+    if ( $ArgumentsList.IndexOf('--raw') -gt 0 ) { return $Result }
+
     try {
     
-        [object[]]$JsonResult = $Result | ConvertFrom-Json
+        [object[]]$JsonResult = $Result | ConvertFrom-Json -ErrorAction SilentlyContinue
         
     } catch {
     
@@ -108,27 +152,76 @@ function bw {
 
     if ( $JsonResult ) {
 
-        $JsonResult.Where({ $_.login }).ForEach({
-        
-            $_.login.password = ConvertTo-SecureString -String $_.login.password -AsPlainText -Force
+        $JsonResult.ForEach({
 
-            $_.login | Add-Member -MemberType NoteProperty -Name credential -Value ([pscredential]::new( $_.login.username, $_.login.password ))
-
-        })
-
-        $JsonResult.fields.Where({ $_.type -eq 1 }).ForEach({
-        
-            $_.value = ConvertTo-SecureString -String $_.value -AsPlainText -Force
-        
-        })
-
-        $JsonResult.Where({ $_.passwordHistory }).passwordHistory.ForEach({
-        
-            $_.password = ConvertTo-SecureString -String $_.password -AsPlainText -Force
+            if ( $_.type ) {
             
-        })
+                if ( $_.object -eq 'item' ) {
+                    
+                    [BitwardenItemType]$_.type = [int]$_.type
+                
+                } elseif ( $_.object -eq 'org-member' ) {
+                    
+                    [BitwardenOrganizationUserType]$_.type = [int]$_.type
+                    [BitwardenOrganizationUserStatus]$_.status = [int]$_.status
 
-        return $JsonResult
+                }
+
+            }
+
+            if ( $_.login ) {
+
+                if ( $null -ne $_.login.password ) {
+
+                    $_.login.password = ConvertTo-SecureString -String $_.login.password -AsPlainText -Force
+
+                } else {
+
+                    $_.login.password = [System.Security.SecureString]::new()
+
+                }
+
+                $_.login | Add-Member -MemberType NoteProperty -Name credential -Value ([pscredential]::new( $_.login.username, $_.login.password ))
+
+                $_.login.uris.ForEach({ [BitwardenUriMatchType]$_.match = [int]$_.match })
+            
+            }
+
+            if ( $_.passwordHistory ) {
+
+                $_.passwordHistory.ForEach({
+        
+                    $_.password = ConvertTo-SecureString -String $_.password -AsPlainText -Force
+                    
+                })
+
+            }
+
+            if ( $_.identity.ssn ) {
+
+                $_.identity.ssn = ConvertTo-SecureString -String $_.identity.ssn -AsPlainText -Force
+                
+            }
+
+            if ( $_.fields ) {
+
+                $_.fields.ForEach({
+
+                    [BitwardenFieldType]$_.type = [int]$_.type
+
+                    if ( $_.type -eq [BitwardenFieldType]::Hidden ) {
+
+                        $_.value = ConvertTo-SecureString -String $_.value -AsPlainText -Force
+
+                    }
+                
+                })
+
+            }
+
+            $_
+
+        })
 
     } else {
 
