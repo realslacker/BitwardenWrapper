@@ -1,25 +1,21 @@
-[version]$SupportedVersion = '1.16'
+$MyModuleManifest = Join-Path $PSScriptRoot $MyInvocation.MyCommand.Name.Replace('.psm1', '.psd1')
+$MyModuleInfo = Import-PowerShellDataFile -Path $MyModuleManifest
+$MyModuleVersion = $MyModuleInfo.ModuleVersion -as [version]
 
-# check if we should use a specific bw.exe
-if ( $env:BITWARDEN_CLI_PATH ) {
+if ( -not $env:BITWARDENCLI_APPDATA_DIR ) {
 
-    $BitwardenCLI = Get-Command $env:BITWARDEN_CLI_PATH -CommandType Application -ErrorAction SilentlyContinue
+    $env:BITWARDENCLI_APPDATA_DIR = New-TemporaryFile | ForEach-Object {
+        $_ | Remove-Item -Confirm:$false -Force
+        New-Item -Path $_.FullName -ItemType Directory | Convert-Path
+    }
 
-} else {
+    New-Item -Path ( Join-Path $env:BITWARDENCLI_APPDATA_DIR 'data.json' ) -ItemType File > $null
 
-    $BitwardenCLI = Get-Command -Name bw.exe -CommandType Application -ErrorAction SilentlyContinue
-
-}
-
-if ( -not $BitwardenCLI ) {
-
-    Write-Warning 'No Bitwarden CLI found in your path, either specify $env:BITWARDEN_CLI_PATH or put bw.exe in your path. You can use Install-BitwardenCLI to install to C:\Windows\System32'
-
-}
-
-if ( $BitwardenCLI -and $BitwardenCLI.Version -lt $SupportedVersion ) {
-
-    Write-Warning "Your Bitwarden CLI is version $($BitwardenCLI.Version) and out of date, please upgrade to at least version $SupportedVersion."
+    $ExecutionContext.SessionState.Module.OnRemove = {
+        Remove-Item -Path $env:BITWARDENCLI_APPDATA_DIR -Recurse -Confirm:$false -Force
+        Remove-Item env:\BW_SESSION -ErrorAction SilentlyContinue
+        Remove-Item env:\BITWARDENCLI_APPDATA_DIR -ErrorAction SilentlyContinue
+    }
 
 }
 
@@ -65,74 +61,101 @@ enum BitwardenOrganizationUserStatus {
     Confirmed       = 2
 }
 
-<#
-.SYNOPSIS
- Helper function to install bw.exe to $env:windir\system32
-
-.DESCRIPTION
- Helper function to install bw.exe to $env:windir\system32
-
-.PARAMETER Force
- Install even if bw.exe is present
-#>
 function Install-BitwardenCLI {
+    <#
+    .SYNOPSIS
+    Helper function to install bw-cli application
+    .DESCRIPTION
+    Helper function to install bw-cli application
+    .PARAMETER Path
+    Where to install the bw-cli application
+    .PARAMETER Platform
+    Which platform binary should be downloaded
+    .PARAMETER Force
+    Install even if the bw-cli application is the same or newer than the module version
+    #>
+    [CmdletBinding(
+        SupportsShouldProcess,
+        ConfirmImpact='High'
+    )]
+    param(
 
-    param( [switch]$Force )
+        [Parameter( Mandatory, Position=0 )]
+        [Alias( 'InstallDirectory' )]
+        [string]
+        $Path,
 
-    $ErrorActionPreference = 'Stop'
+        [ValidateSet( 'Windows', 'MacOS', 'Linux', 'Auto' )]
+        [string]
+        $Platform = 'Auto',
+
+        [switch]
+        $Force
+
+    )
 
     if ( -not [environment]::Is64BitOperatingSystem ) {
-
         Write-Error "Cannot install on 32-bit OS"
         return
-
     }
 
-    if ( -not $Force -and ( $bw = Get-Command -Name bw.exe -CommandType Application -ErrorAction SilentlyContinue ) ) {
+    $bw = Resolve-Path -LiteralPath $Path -ErrorAction Stop |
+        Get-ChildItem -Filter 'bw*' |
+        Where-Object BaseName -eq 'bw' |
+        Get-Command -CommandType Application
 
-        Write-Warning "Bitwarden CLI already installed to $($bw.Path), use -Force to install anyway"
+    if ( $Script:MyModuleVersion -le $bw.Version -and -not $Force ) {
+        Write-Warning ( 'Installed version v{0} is the same or newer than the module version. Use -Force to install anyway.' -f $bw.Version )
         return
+    }
 
+    $VerboseDescription = 'Current version of Bitwarden CLI installed at "{0}" will be replaced.' -f $bw.FullName
+    $VerboseWarning = 'Bitwarden CLI v{0} already installed at "{1}", replace?' -f $bw.Version, $bw.Path
+    $Caption = 'Update Bitwarden CLI'
+
+    if ( $bw -and -not $PSCmdlet.ShouldProcess( $VerboseDescription, $VerboseWarning, $Caption ) ) { return }
+
+    if ( $Platform -eq 'Auto' -and $IsMacOS ) { $Platform = 'MacOS' }
+    if ( $Platform -eq 'Auto' -and $IsLinux ) { $Platform = 'Linux' }
+    if ( $Platform -eq 'Auto' -and $IsWindows ) { $Platform = 'Windows' }
+    if ( $Platform -eq 'Auto' ) {
+        Write-Error 'Failed to detect platform!' -ErrorAction Stop
     }
 
     $TempPath = New-TemporaryFile | ForEach-Object { Rename-Item -Path $_.FullName -NewName $_.Name.Replace( $_.Extension, '.zip' ) -PassThru }
 
-    Invoke-WebRequest -UseBasicParsing -Uri 'https://vault.bitwarden.com/download/?app=cli&platform=windows' -OutFile $TempPath.FullName
+    $DownloadUri = 'https://vault.bitwarden.com/download/?app=cli&platform={0}' -f $Platform.ToLower()
+    
+    Invoke-WebRequest -UseBasicParsing -Uri $DownloadUri -OutFile $TempPath.FullName
 
     Expand-Archive -Path $TempPath -DestinationPath $env:TEMP -Force
 
-    Start-Process -FilePath powershell.exe -ArgumentList "-NoProfile -NonInteractive -NoExit -Command ""Move-Item -Path '$env:TEMP\bw.exe' -Destination '$env:windir\System32\bw.exe' -Confirm:`$false -Force""" -Verb RunAs -Wait
-
-    $Script:BitwardenCLI = Get-Command "$env:windir\System32\bw.exe" -CommandType Application -ErrorAction Stop
+    Move-Item $TempPath.FullName -Destination $Path -Confirm:$false -ErrorAction Stop
+    
+    $Script:BitwardenCLI = Get-Command "$Path\bw.exe" -CommandType Application -ErrorAction Stop
 
 }
 
-<#
-.SYNOPSIS
- The Bitwarden command-line interface (CLI) is a powerful, fully-featured tool for accessing and managing your Vault.
-
-.DESCRIPTION
- The Bitwarden command-line interface (CLI) is a powerful, fully-featured tool for accessing and managing your Vault.
- Most features that you find in other Bitwarden client applications (Desktop, Browser Extension, etc.) are available
- from the CLI. The Bitwarden CLI is self-documented. From the command line, learn about the available commands using:
- bw --help
-
-#>
 function bw {
+    <#
+    .SYNOPSIS
+    The Bitwarden command-line interface (CLI) is a powerful, fully-featured tool for accessing and managing your Vault.
+    .DESCRIPTION
+    The Bitwarden command-line interface (CLI) is a powerful, fully-featured tool for accessing and managing your Vault.
+    Most features that you find in other Bitwarden client applications (Desktop, Browser Extension, etc.) are available
+    from the CLI. The Bitwarden CLI is self-documented. From the command line, learn about the available commands using:
+    bw --help
+    #>
 
     if ( -not $BitwardenCLI ) {
-
         Write-Error "Bitwarden CLI is not installed!"
         return
-
     }
 
     [System.Collections.Generic.List[string]]$ArgumentsList = $args
 
     if ( ( $ArgumentsList.Contains('unlock') -or $ArgumentsList.Contains('login') ) -and $ArgumentsList.Contains('--raw') ) {
-
         $ArgumentsList.RemoveAt( $ArgumentsList.IndexOf('--raw') )
-
     }
 
     [string[]]$Result = & $BitwardenCLI @ArgumentsList
@@ -252,10 +275,10 @@ Register-ArgumentCompleter -CommandName bw -ScriptBlock {
     )
 
     $__Commands = @{
-        login          = '--raw --method --code --sso --check --help'
+        login          = '--raw --method --code --sso --apikey --passwordenv --passwordfile --check --help'
         logout         = '--help'
         lock           = '--help'
-        unlock         = '--check --raw --help'
+        unlock         = '--check --passwordenv --passwordfile --raw --help'
         sync           = '--force --last --help'
         list           = '--search --url --folderid --collectionid --organizationid --trash --help'
         get            = '--itemid --output --organizationid --help'
@@ -267,7 +290,7 @@ Register-ArgumentCompleter -CommandName bw -ScriptBlock {
         confirm        = '--organizationid --help'
         import         = '--formats --help'
         export         = '--output --format --organizationid --help'
-        generate       = '--uppercase --lowercase --number --special --passphrase --length --words --separator --help'
+        generate       = '--uppercase --lowercase --number --special --passphrase --length --words --separator --capitalize --includeNumber --help'
         encode         = '--help'
         config         = '--web-vault --api --identity --icons --notifications --events --help'
         update         = '--raw --help'
@@ -290,7 +313,7 @@ Register-ArgumentCompleter -CommandName bw -ScriptBlock {
         '--shell'      = 'zsh'
     }
 
-    $__CommonParams    = '--pretty --raw --response --quiet --nointeraction --session --version --help'
+    $__CommonParams    = '--pretty --raw --response --cleanexit --quiet --nointeraction --session --version --help'
 
     $__HasCompleter    = 'list get create edit delete restore confirm import config ' +     # commands with auto-complete
                          '--session ' +                                                     # provide session variable
@@ -368,15 +391,14 @@ Register-ArgumentCompleter -CommandName bw -ScriptBlock {
 
 }
 
-<#
-.SYNOPSIS
- Select a credential from those returned from the Bitwarden CLI
-
-.DESCRIPTION
- Select a credential from those returned from the Bitwarden CLI
-#>
 function Select-BWCredential {
-
+    <#
+    .SYNOPSIS
+    Select a credential from those returned from the Bitwarden CLI
+    
+    .DESCRIPTION
+    Select a credential from those returned from the Bitwarden CLI
+    #>
     param(
 
         [Parameter( Mandatory = $true, ValueFromPipeline = $true )]
@@ -420,4 +442,22 @@ function Select-BWCredential {
 
     }
 
+}
+
+
+# check if we should use a specific bw.exe
+if ( $env:BITWARDEN_CLI_PATH ) {
+    $BitwardenCLI = Get-Command $env:BITWARDEN_CLI_PATH -CommandType Application -ErrorAction SilentlyContinue
+}
+# otherwise we use whatever we can find on the path
+else {
+    $BitwardenCLI = Get-Command -Name bw -CommandType Application -ErrorAction SilentlyContinue
+}
+
+if ( -not $BitwardenCLI ) {
+    Write-Warning 'No Bitwarden CLI found in your path, either specify $env:BITWARDEN_CLI_PATH or put bw in your path. You can use Install-BitwardenCLI to download a copy to a specific location.'
+}
+
+if ( $BitwardenCLI -and $Script:MyModuleVersion -gt $BitwardenCLI.Version ) {
+    Write-Warning ( 'Your Bitwarden CLI v{0} is out of date, please upgrade to at least version.' -f $BitwardenCLI.Version )
 }
