@@ -136,6 +136,31 @@ function Install-BitwardenCLI {
 
 }
 
+function Test-BitwardenCLIVersionCurrent {
+
+    [CmdletBinding()]
+    param()
+
+    if ( -not $BitwardenCLI ) {
+        Write-Error "Bitwarden CLI is not installed!"
+        return
+    }
+
+    [version]$CliVersion = & $BitwardenCLI --version --raw
+
+    $VersionIsCurrent = $MyModuleVersion -gt $CliVersion
+
+    if ( $VersionIsCurrent ) {
+        Write-Verbose ( 'Your Bitwarden CLI v{0} is current.' -f $CliVersion )
+    }
+    else {
+        Write-Warning ( 'Your Bitwarden CLI v{0} is out of date, please upgrade to at least v{1}.' -f $CliVersion, $MyModuleVersion )
+    }
+
+    return $VersionIsCurrent
+
+}
+
 function bw {
     <#
     .SYNOPSIS
@@ -458,6 +483,4 @@ if ( -not $BitwardenCLI ) {
     Write-Warning 'No Bitwarden CLI found in your path, either specify $env:BITWARDEN_CLI_PATH or put bw in your path. You can use Install-BitwardenCLI to download a copy to a specific location.'
 }
 
-if ( $BitwardenCLI -and $Script:MyModuleVersion -gt $BitwardenCLI.Version ) {
-    Write-Warning ( 'Your Bitwarden CLI v{0} is out of date, please upgrade to at least version.' -f $BitwardenCLI.Version )
-}
+Test-BitwardenCLIVersionCurrent
