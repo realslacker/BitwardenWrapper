@@ -2,21 +2,12 @@ $MyModuleManifest = Join-Path $PSScriptRoot $MyInvocation.MyCommand.Name.Replace
 $MyModuleInfo = Import-PowerShellDataFile -Path $MyModuleManifest
 $MyModuleVersion = $MyModuleInfo.ModuleVersion -as [version]
 
-if ( -not $env:BITWARDENCLI_APPDATA_DIR ) {
-
-    $env:BITWARDENCLI_APPDATA_DIR = New-TemporaryFile | ForEach-Object {
-        $_ | Remove-Item -Confirm:$false -Force
-        New-Item -Path $_.FullName -ItemType Directory | Convert-Path
+if ( Test-Path ~\.config\BitwardenWrapper\session.xml ) {
+    try {
+        $env:BW_SESSION = (Import-Clixml -Path ~\.config\BitwardenWrapper\session.xml).GetNetworkCredential().Password
+    } catch {
+        Write-Warning ( 'Failed to import session key! {0}' -f $_.Exception.Message )
     }
-
-    New-Item -Path ( Join-Path $env:BITWARDENCLI_APPDATA_DIR 'data.json' ) -ItemType File > $null
-
-    $ExecutionContext.SessionState.Module.OnRemove = {
-        Remove-Item -Path $env:BITWARDENCLI_APPDATA_DIR -Recurse -Confirm:$false -Force
-        Remove-Item env:\BW_SESSION -ErrorAction SilentlyContinue
-        Remove-Item env:\BITWARDENCLI_APPDATA_DIR -ErrorAction SilentlyContinue
-    }
-
 }
 
 enum BitwardenMfaMethod {
@@ -277,6 +268,7 @@ function bw {
         if ( $Result -and $Result[-1] -like '*--session*' ) {
 
             $env:BW_SESSION = $Result[-1].Trim().Split(' ')[-1]
+            [pscredential]::new( 'SessionKey', ($env:BW_SESSION | ConvertTo-SecureString -AsPlainText -Force) ) | Export-Clixml -Path ~\.config\BitwardenWrapper\session.xml
             return $Result[0]
 
         } else {
@@ -416,6 +408,53 @@ Register-ArgumentCompleter -CommandName bw -ScriptBlock {
 
 }
 
+
+function Get-BWCredential {
+    
+    param(
+
+        [Parameter( Position = 1)]
+        [Alias( 'UserName', 'Email' )]
+        [string]
+        $Search,
+
+        [string]
+        $Url,
+
+        [ValidateSet( 'Choose', 'Error' )]
+        [string]
+        $MultipleAction = 'Error'
+
+    )
+    
+    [System.Collections.Generic.List[string]]$SearchParams = 'list', 'items'
+
+    if ( $Search ) {
+        $SearchParams.Add( '--search' )
+        $SearchParams.Add( $Search )
+    }
+
+    if ( $Url ) {
+        $SearchParams.Add( '--url' )
+        $SearchParams.Add( $Url )
+    }
+
+    [object[]]$Result = bw @SearchParams | Where-Object { $_.login.credential }
+
+    if ( $Result.Count -eq 0 ) {
+        Write-Error 'No results returned'
+        return
+    }
+
+    if ( $Result.Count -gt 1 -and $MultipleAction -eq 'Error' ) {
+        Write-Error 'Multiple entries returned'
+        return
+    }
+    
+    $Result | Select-BWCredential
+
+}
+
 function Select-BWCredential {
     <#
     .SYNOPSIS
@@ -434,36 +473,46 @@ function Select-BWCredential {
 
     begin {
 
-        [System.Collections.ArrayList]$LoginItems = @()
+        $ChooserProperties = @(
+            @{ Name = '    '     ; Expression = { '{0,3})' -f $Result.IndexOf($_)            } }
+            @{ Name = 'Name'     ; Expression = { $_.name                                    } }
+            @{ Name = 'UserName' ; Expression = { $_.login.username                          } }
+            @{ Name = 'Uri'      ; Expression = { $_.login.uris.uri | Select-Object -First 1 } }
+        )
+
+        [System.Collections.ArrayList]$Result = @()
 
     }
 
     process {
 
-        $BitwardenItems.Where({ $_.login }) | ForEach-Object { $LoginItems.Add($_) > $null }
+        $BitwardenItems.Where({ $_.login }) | ForEach-Object { $Result.Add($_) > $null }
 
     }
 
     end {
 
-        if ( $LoginItems.Count -eq 0 ) {
-
-            Write-Warning 'No login found!'
+        if ( $Result.Count -eq 0 ) {
+            Write-Error 'No results returned'
             return
-
         }
-
-        if ( $LoginItems.Count -eq 1 ) {
-
-            return $LoginItems.login.Credential
-
+        
+        if ( $Result.Count -gt 1 ) {
+    
+            $Result | Select-Object $ChooserProperties | Format-Table
+            
+            $Selection = ( Read-Host 'Selection' ) -as [int]
+    
         }
+        else {
 
-        $SelectedItem = $LoginItems |
-            Select-Object Id, Name, @{N='UserName';E={$_.login.username}}, @{N='PrimaryURI';E={$_.login.uris[0].uri}} |
-            Out-GridView -Title 'Choose Login' -OutputMode Single
-
-        return $LoginItems.Where({ $_.Id -eq $SelectedItem.Id }).login.Credential
+            $Selection = 0
+        
+        }
+    
+        if ( $null -eq $Result[$Selection] ) { return }
+    
+        return $Result[$Selection].login.credential
 
     }
 
