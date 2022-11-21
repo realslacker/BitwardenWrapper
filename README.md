@@ -22,6 +22,6 @@ Install-Module -Name BitwardenWrapper -Force
 To support auto-lock on Windows you can import a scheduled task that will lock bw-cli on workstation
 lock, or shutdown.
 
-[Windows Scheduled Task Definition](task/Bitwarden CLI Auto-Lock.xml)
+[Windows Scheduled Task Definition](task/Bitwarden%20CLI%20Auto-Lock.xml)
 
 If anyone can contribute a similar file for MacOS or Linux please make a PR.
