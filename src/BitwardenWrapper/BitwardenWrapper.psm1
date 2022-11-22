@@ -258,6 +258,10 @@ function bw {
 
             }
 
+            if ( $_.status ) {
+                $env:BW_STATUS = $_.status
+            }
+
             $_
 
         })
@@ -269,13 +273,15 @@ function bw {
 
             $env:BW_SESSION = $Result[-1].Trim().Split(' ')[-1]
             [pscredential]::new( 'SessionKey', ($env:BW_SESSION | ConvertTo-SecureString -AsPlainText -Force) ) | Export-Clixml -Path ~\.config\BitwardenWrapper\session.xml
-            return $Result[0]
+            $Result[0]
 
         } else {
 
-            return $Result
+            $Result
 
         }
+        
+        bw status > $null
 
     }
 
@@ -528,7 +534,11 @@ else {
     $BitwardenCLI = Get-Command -Name bw -CommandType Application -ErrorAction SilentlyContinue
 }
 
-if ( -not $BitwardenCLI ) {
+if ( $BitwardenCLI ) {
+    # populate $env:BW_STATUS
+    bw status > $null
+}
+else {
     Write-Warning 'No Bitwarden CLI found in your path, either specify $env:BITWARDEN_CLI_PATH or put bw in your path. You can use Install-BitwardenCLI to download a copy to a specific location.'
 }
 
