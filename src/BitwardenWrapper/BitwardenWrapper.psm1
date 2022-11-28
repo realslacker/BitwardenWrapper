@@ -1,15 +1,3 @@
-$MyModuleManifest = Join-Path $PSScriptRoot $MyInvocation.MyCommand.Name.Replace('.psm1', '.psd1')
-$MyModuleInfo = Import-PowerShellDataFile -Path $MyModuleManifest
-$MyModuleVersion = $MyModuleInfo.ModuleVersion -as [version]
-
-if ( Test-Path ~\.config\BitwardenWrapper\session.xml ) {
-    try {
-        $env:BW_SESSION = (Import-Clixml -Path ~\.config\BitwardenWrapper\session.xml).GetNetworkCredential().Password
-    } catch {
-        Write-Warning ( 'Failed to import session key! {0}' -f $_.Exception.Message )
-    }
-}
-
 enum BitwardenMfaMethod {
     Authenticator   = 0
     Email           = 1
@@ -127,25 +115,51 @@ function Install-BitwardenCLI {
 
 }
 
-function Test-BitwardenCLIVersionCurrent {
-
+function Get-BitwardenCLI {
     [CmdletBinding()]
+    [OutputType( [System.Management.Automation.ApplicationInfo] )]
     param()
 
-    if ( -not $BitwardenCLI ) {
+    if ( -not $Script:BitwardenCLI ) {
+    
+        # check if we should use a specific bw.exe
+        if ( $env:BITWARDEN_CLI_PATH ) {
+            $Script:BitwardenCLI = Get-Command $env:BITWARDEN_CLI_PATH -CommandType Application -ErrorAction SilentlyContinue
+        }
+        # otherwise we use whatever we can find on the path
+        else {
+            $Script:BitwardenCLI = Get-Command -Name bw -CommandType Application -ErrorAction SilentlyContinue
+        }
+
+    }
+
+    if ( $Script:BitwardenCLI ) {
+        return $Script:BitwardenCLI
+    }
+    else {
         Write-Error "Bitwarden CLI is not installed!"
         return
     }
 
-    [version]$CliVersion = & $BitwardenCLI --version --raw
+}
 
-    $VersionIsCurrent = $MyModuleVersion -gt $CliVersion
+function Test-BitwardenCLIVersionCurrent {
+    [CmdletBinding()]
+    param()
+
+    if ( -not $Script:ModuleVersion ) {
+        [version]$Script:ModuleVersion = Import-PowerShellDataFile -Path (Get-PSCallStack)[0].ScriptName.Replace('.psm1', '.psd1') -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ModuleVersion
+    }
+
+    [version]$CliVersion = bw --version --raw
+
+    $VersionIsCurrent = $ModuleVersion -gt $CliVersion
 
     if ( $VersionIsCurrent ) {
-        Write-Verbose ( 'Your Bitwarden CLI v{0} is current.' -f $CliVersion )
+        Write-Information ( 'Your Bitwarden CLI v{0} is current.' -f $CliVersion )
     }
     else {
-        Write-Warning ( 'Your Bitwarden CLI v{0} is out of date, please upgrade to at least v{1}.' -f $CliVersion, $MyModuleVersion )
+        Write-Warning ( 'Your Bitwarden CLI v{0} is out of date, please upgrade to at least v{1}.' -f $CliVersion, $ModuleVersion )
     }
 
     return $VersionIsCurrent
@@ -163,21 +177,45 @@ function bw {
     bw --help
     #>
 
-    if ( -not $BitwardenCLI ) {
-        Write-Error "Bitwarden CLI is not installed!"
-        return
-    }
-
+    $bw = Get-BitwardenCLI -ErrorAction Stop
+    
     [System.Collections.Generic.List[string]]$ArgumentsList = $args
 
-    if ( ( $ArgumentsList.Contains('unlock') -or $ArgumentsList.Contains('login') ) -and $ArgumentsList.Contains('--raw') ) {
-        $ArgumentsList.RemoveAt( $ArgumentsList.IndexOf('--raw') )
+    $SessionParams = @()
+    
+    if ( $ArgumentsList.Contains('--session') ) {
+        $SessionParamIndex = $ArgumentsList.IndexOf('--session')
+        $SessionParams = @(
+            '--session',
+            $ArgumentsList[ $SessionParamIndex + 1 ]
+        )
+        $ArgumentsList.RemoveRange( $SessionParamIndex, 2 )
+    }
+    elseif ( $env:BW_SESSION ) {
+        $SessionParams = @(
+            '--session',
+            $env:BW_SESSION
+        )
+    }
+    elseif ( Test-Path ~\.config\BitwardenWrapper\session.xml -PathType Leaf ) {
+        $SessionParams = @(
+            '--session',
+            (Import-Clixml -Path ~\.config\BitwardenWrapper\session.xml).GetNetworkCredential().Password
+        )
     }
 
-    [string[]]$Result = & $BitwardenCLI @ArgumentsList
+    #if ( ( $ArgumentsList.Contains('unlock') -or $ArgumentsList.Contains('login') ) -and $ArgumentsList.Contains('--raw') ) {
+    #    $ArgumentsList.RemoveAt( $ArgumentsList.IndexOf('--raw') )
+    #}
 
-    if ( $ArgumentsList.IndexOf('--raw') -gt 0 ) { return $Result }
+    [string[]]$Result = & $bw @SessionParams @ArgumentsList
 
+    if ( $ArgumentsList.IndexOf('lock') -ge 0 ) {
+        Remove-Item ~\.config\BitwardenWrapper\.unlocked -ErrorAction SilentlyContinue
+    }
+    
+    if ( $ArgumentsList.IndexOf('--raw') -ge 0 ) { return $Result }
+    
     try {
     
         [object[]]$JsonResult = $Result | ConvertFrom-Json -ErrorAction SilentlyContinue
@@ -259,20 +297,32 @@ function bw {
             }
 
             if ( $_.status ) {
-                $env:BW_STATUS = $_.status
+                if ( $_.status -eq 'unlocked' ) {
+                    New-Item ~\.config\BitwardenWrapper\.unlocked -Force > $null
+                } else {
+                    Remove-Item ~\.config\BitwardenWrapper\.locked -ErrorAction SilentlyContinue
+                }
             }
 
             $_
 
         })
 
-    } else {
+    }
+    
+    else {
 
         # look for session key
         if ( $Result -and $Result[-1] -like '*--session*' ) {
 
-            $env:BW_SESSION = $Result[-1].Trim().Split(' ')[-1]
-            [pscredential]::new( 'SessionKey', ($env:BW_SESSION | ConvertTo-SecureString -AsPlainText -Force) ) | Export-Clixml -Path ~\.config\BitwardenWrapper\session.xml
+            New-Item ~\.config\BitwardenWrapper\.unlocked -Force > $null
+
+            $SessionParams = @(
+                '--session',
+                $Result[-1].Trim().Split(' ')[-1]
+            )
+
+            [pscredential]::new( 'SessionKey', ( $SessionParams[1] | ConvertTo-SecureString -AsPlainText -Force) ) | Export-Clixml -Path ~\.config\BitwardenWrapper\session.xml
             $Result[0]
 
         } else {
@@ -280,8 +330,6 @@ function bw {
             $Result
 
         }
-        
-        bw status > $null
 
     }
 
@@ -505,7 +553,7 @@ function Select-BWCredential {
         
         if ( $Result.Count -gt 1 ) {
     
-            $Result | Select-Object $ChooserProperties | Format-Table
+            $Result | Select-Object $ChooserProperties | Format-Table | Out-Host
             
             $Selection = ( Read-Host 'Selection' ) -as [int]
     
@@ -523,23 +571,3 @@ function Select-BWCredential {
     }
 
 }
-
-
-# check if we should use a specific bw.exe
-if ( $env:BITWARDEN_CLI_PATH ) {
-    $BitwardenCLI = Get-Command $env:BITWARDEN_CLI_PATH -CommandType Application -ErrorAction SilentlyContinue
-}
-# otherwise we use whatever we can find on the path
-else {
-    $BitwardenCLI = Get-Command -Name bw -CommandType Application -ErrorAction SilentlyContinue
-}
-
-if ( $BitwardenCLI ) {
-    # populate $env:BW_STATUS
-    bw status > $null
-}
-else {
-    Write-Warning 'No Bitwarden CLI found in your path, either specify $env:BITWARDEN_CLI_PATH or put bw in your path. You can use Install-BitwardenCLI to download a copy to a specific location.'
-}
-
-Test-BitwardenCLIVersionCurrent
