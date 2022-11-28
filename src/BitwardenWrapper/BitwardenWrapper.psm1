@@ -153,7 +153,7 @@ function Test-BitwardenCLIVersionCurrent {
 
     [version]$CliVersion = bw --version --raw
 
-    $VersionIsCurrent = $ModuleVersion -gt $CliVersion
+    $VersionIsCurrent = $CliVersion -ge $Script:ModuleVersion
 
     if ( $VersionIsCurrent ) {
         Write-Information ( 'Your Bitwarden CLI v{0} is current.' -f $CliVersion )
