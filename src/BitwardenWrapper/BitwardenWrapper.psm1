@@ -565,6 +565,12 @@ function Select-BWCredential {
         }
     
         if ( $null -eq $Result[$Selection] ) { return }
+
+        $Credential = $Result[$Selection].login.credential
+
+        if ( -not [string]::IsNullOrEmpty( $Result[$Selection].login.totp ) ) {
+            $Credential | Add-Member -MemberType ScriptProperty -Name TOTP -Value ([scriptblock]::Create("bw get totp $($Result[$Selection].id) --raw"))
+        }
     
         return $Result[$Selection].login.credential
 
