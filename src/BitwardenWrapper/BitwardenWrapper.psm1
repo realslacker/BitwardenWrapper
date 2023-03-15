@@ -40,6 +40,14 @@ enum BitwardenOrganizationUserStatus {
     Confirmed       = 2
 }
 
+$SessionCacheFolder = "~\.config\BitwardenWrapper"
+if ( -not( Test-Path -Path $SessionCacheFolder ) ) {
+    New-Item -Path $SessionCacheFolder -ItemType Directory -ErrorAction Stop > $null
+}
+$SessionCacheFolder = $SessionCacheFolder | Resolve-Path | Convert-Path
+
+$env:BITWARDENCLI_APPDATA_DIR = $SessionCacheFolder
+
 function Install-BitwardenCLI {
     <#
     .SYNOPSIS
@@ -73,6 +81,11 @@ function Install-BitwardenCLI {
 
     )
 
+    if ( -not( Test-Path -Path $Path -PathType Container ) ) {
+        Write-Error 'Path must be a directory.'
+        return
+    }
+
     if ( -not [environment]::Is64BitOperatingSystem ) {
         Write-Error "Cannot install on 32-bit OS"
         return
@@ -82,11 +95,6 @@ function Install-BitwardenCLI {
         Get-ChildItem -Filter 'bw*' |
         Where-Object BaseName -eq 'bw' |
         Get-Command -CommandType Application
-
-    if ( $Script:MyModuleVersion -le $bw.Version -and -not $Force ) {
-        Write-Warning ( 'Installed version v{0} is the same or newer than the module version. Use -Force to install anyway.' -f $bw.Version )
-        return
-    }
 
     $VerboseDescription = 'Current version of Bitwarden CLI installed at "{0}" will be replaced.' -f $bw.FullName
     $VerboseWarning = 'Bitwarden CLI v{0} already installed at "{1}", replace?' -f $bw.Version, $bw.Path
@@ -101,15 +109,16 @@ function Install-BitwardenCLI {
         Write-Error 'Failed to detect platform!' -ErrorAction Stop
     }
 
-    $TempPath = New-TemporaryFile | ForEach-Object { Rename-Item -Path $_.FullName -NewName $_.Name.Replace( $_.Extension, '.zip' ) -PassThru }
+    $TempPath = New-TemporaryFile | ForEach-Object { Rename-Item -Path $_.FullName -NewName $_.Name.Replace( $_.Extension, '.zip' ) -PassThru } | Convert-Path
 
     $DownloadUri = 'https://vault.bitwarden.com/download/?app=cli&platform={0}' -f $Platform.ToLower()
     
-    Invoke-WebRequest -UseBasicParsing -Uri $DownloadUri -OutFile $TempPath.FullName
+    Invoke-WebRequest -UseBasicParsing -Uri $DownloadUri -OutFile $TempPath
 
     Expand-Archive -Path $TempPath -DestinationPath $env:TEMP -Force
+    Remove-Item -Path $TempPath -Force -Confirm:$false -ErrorAction SilentlyContinue
 
-    Move-Item $TempPath.FullName -Destination $Path -Confirm:$false -ErrorAction Stop
+    Move-Item -Path "$env:TEMP\bw.exe" -Destination $Path -Force -Confirm:$false -ErrorAction Stop -Verbose
     
     $Script:BitwardenCLI = Get-Command "$Path\bw.exe" -CommandType Application -ErrorAction Stop
 
@@ -197,10 +206,10 @@ function bw {
             $env:BW_SESSION
         )
     }
-    elseif ( Test-Path ~\.config\BitwardenWrapper\session.xml -PathType Leaf ) {
+    elseif ( Test-Path "$SessionCacheFolder\session.xml" -PathType Leaf ) {
         $SessionParams = @(
             '--session',
-            (Import-Clixml -Path ~\.config\BitwardenWrapper\session.xml).GetNetworkCredential().Password
+            (Import-Clixml -Path "$SessionCacheFolder\session.xml").GetNetworkCredential().Password
         )
     }
 
@@ -210,8 +219,10 @@ function bw {
 
     [string[]]$Result = & $bw @SessionParams @ArgumentsList
 
+    $Result | %{ Write-Verbose $_ }
+
     if ( $ArgumentsList.IndexOf('lock') -ge 0 ) {
-        Remove-Item ~\.config\BitwardenWrapper\.unlocked -ErrorAction SilentlyContinue
+        Remove-Item "$SessionCacheFolder\.unlocked" -ErrorAction SilentlyContinue
     }
     
     if ( $ArgumentsList.IndexOf('--raw') -ge 0 ) { return $Result }
@@ -222,12 +233,14 @@ function bw {
         
     } catch {
     
-        Write-Verbose "JSON Parse Message:"
+        Write-Verbose 'JSON Parse Message:'
         Write-Verbose $_.Exception.Message
     
     }
 
     if ( $JsonResult ) {
+
+        Write-Verbose 'Processing JSON output...'
 
         $JsonResult.ForEach({
 
@@ -298,9 +311,9 @@ function bw {
 
             if ( $_.status ) {
                 if ( $_.status -eq 'unlocked' ) {
-                    New-Item ~\.config\BitwardenWrapper\.unlocked -Force > $null
+                    New-Item "$SessionCacheFolder\.unlocked" -Force > $null
                 } else {
-                    Remove-Item ~\.config\BitwardenWrapper\.locked -ErrorAction SilentlyContinue
+                    Remove-Item "$SessionCacheFolder\.unlocked" -ErrorAction SilentlyContinue
                 }
             }
 
@@ -312,17 +325,21 @@ function bw {
     
     else {
 
+        Write-Verbose 'Processing text output...'
+
         # look for session key
         if ( $Result -and $Result[-1] -like '*--session*' ) {
 
-            New-Item ~\.config\BitwardenWrapper\.unlocked -Force > $null
+            Write-Verbose 'Found session key, unlocking...'
+
+            New-Item "$SessionCacheFolder\.unlocked" -Force > $null
 
             $SessionParams = @(
                 '--session',
                 $Result[-1].Trim().Split(' ')[-1]
             )
 
-            [pscredential]::new( 'SessionKey', ( $SessionParams[1] | ConvertTo-SecureString -AsPlainText -Force) ) | Export-Clixml -Path ~\.config\BitwardenWrapper\session.xml
+            [pscredential]::new( 'SessionKey', ( $SessionParams[1] | ConvertTo-SecureString -AsPlainText -Force) ) | Export-Clixml -Path "$SessionCacheFolder\session.xml"
             $Result[0]
 
         } else {

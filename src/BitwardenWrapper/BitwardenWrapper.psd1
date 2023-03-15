@@ -12,7 +12,7 @@
 RootModule = 'BitwardenWrapper.psm1'
 
 # Version number of this module.
-ModuleVersion = '2022.11.0'
+ModuleVersion = '2023.2.0'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -69,16 +69,16 @@ ProcessorArchitecture = 'Amd64'
 # NestedModules = @()
 
 # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
-FunctionsToExport = '*'
+FunctionsToExport = 'bw', 'Get-BitwardenCLI', 'Get-BWCredential', 'Install-BitwardenCLI', 'Select-BWCredential', 'Test-BitwardenCLIVersionCurrent'
 
 # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
-CmdletsToExport = '*'
+CmdletsToExport = @()
 
 # Variables to export from this module
-VariablesToExport = '*'
+VariablesToExport = @()
 
 # Aliases to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no aliases to export.
-AliasesToExport = '*'
+AliasesToExport = 'bw.exe'
 
 # DSC resources to export from this module
 # DscResourcesToExport = @()
