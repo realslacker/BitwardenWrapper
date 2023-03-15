@@ -219,8 +219,6 @@ function bw {
 
     [string[]]$Result = & $bw @SessionParams @ArgumentsList
 
-    $Result | %{ Write-Verbose $_ }
-
     if ( $ArgumentsList.IndexOf('lock') -ge 0 ) {
         Remove-Item "$SessionCacheFolder\.unlocked" -ErrorAction SilentlyContinue
     }
