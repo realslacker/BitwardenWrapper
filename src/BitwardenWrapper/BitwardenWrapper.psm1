@@ -40,140 +40,59 @@ enum BitwardenOrganizationUserStatus {
     Confirmed       = 2
 }
 
-$SessionCacheFolder = "~\.config\BitwardenWrapper"
-if ( -not( Test-Path -Path $SessionCacheFolder ) ) {
-    New-Item -Path $SessionCacheFolder -ItemType Directory -ErrorAction Stop > $null
+$ModuleCacheFolder = "~/.config/BitwardenWrapper"
+if ( -not( Test-Path -Path $ModuleCacheFolder ) ) {
+    New-Item -Path $ModuleCacheFolder -ItemType Directory -ErrorAction Stop > $null
 }
-$SessionCacheFolder = $SessionCacheFolder | Resolve-Path | Convert-Path
+$ModuleCacheFolder = $ModuleCacheFolder | Resolve-Path | Convert-Path
 
-$env:BITWARDENCLI_APPDATA_DIR = $SessionCacheFolder
+$env:BITWARDENCLI_APPDATA_DIR = $ModuleCacheFolder
 
-function Install-BitwardenCLI {
-    <#
-    .SYNOPSIS
-    Helper function to install bw-cli application
-    .DESCRIPTION
-    Helper function to install bw-cli application
-    .PARAMETER Path
-    Where to install the bw-cli application
-    .PARAMETER Platform
-    Which platform binary should be downloaded
-    .PARAMETER Force
-    Install even if the bw-cli application is the same or newer than the module version
-    #>
-    [CmdletBinding(
-        SupportsShouldProcess,
-        ConfirmImpact='High'
-    )]
-    param(
+# if a bw application exists in the Cache folder we'll use
+# that, otherwise use the version that matches this module
+$BitwardenCLI = Get-Command "$ModuleCacheFolder\bw" -CommandType Application -ErrorAction SilentlyContinue
+if ( -not $BitwardenCLI ) {
 
-        [Parameter( Mandatory, Position=0 )]
-        [Alias( 'InstallDirectory' )]
-        [string]
-        $Path,
-
-        [ValidateSet( 'Windows', 'MacOS', 'Linux', 'Auto' )]
-        [string]
-        $Platform = 'Auto',
-
-        [switch]
-        $Force
-
-    )
-
-    if ( -not( Test-Path -Path $Path -PathType Container ) ) {
-        Write-Error 'Path must be a directory.'
-        return
+    $Platform = 'Unsupported'
+    if ( $IsMacOS   ) { $Platform = 'MacOS'   }
+    if ( $IsLinux   ) { $Platform = 'Linux'   }
+    if ( $IsWindows ) { $Platform = 'Windows' }
+    if ( $Platform -eq 'Unsupported' ) {
+        Write-Error 'You appear to be using an unsupported platform. Please manually install a bw-cli binary into ~/.config/BitwardenWrapper/.' -ErrorAction Stop
     }
 
-    if ( -not [environment]::Is64BitOperatingSystem ) {
-        Write-Error "Cannot install on 32-bit OS"
-        return
-    }
+    $ModuleVersion = (Import-PowerShellDataFile -Path "$PSScriptRoot/BitwardenWrapper.psd1").ModuleVersion
 
-    $bw = Resolve-Path -LiteralPath $Path -ErrorAction Stop |
-        Get-ChildItem -Filter 'bw*' |
-        Where-Object BaseName -eq 'bw' |
-        Get-Command -CommandType Application
+    $DefaultPath = '{0}/bw{1}' -f $ModuleCacheFolder, ('','.exe')[$IsWindows]
+    $TargetPath  = '{0}/bw-v{1}{2}' -f $ModuleCacheFolder, $ModuleVersion, ('','.exe')[$IsWindows]
 
-    $VerboseDescription = 'Current version of Bitwarden CLI installed at "{0}" will be replaced.' -f $bw.FullName
-    $VerboseWarning = 'Bitwarden CLI v{0} already installed at "{1}", replace?' -f $bw.Version, $bw.Path
-    $Caption = 'Update Bitwarden CLI'
+    if ( Test-Path -Path $TargetPath ) {
 
-    if ( $bw -and -not $PSCmdlet.ShouldProcess( $VerboseDescription, $VerboseWarning, $Caption ) ) { return }
+        $BitwardenCLI = Get-Command $TargetPath -CommandType Application -ErrorAction Stop
 
-    if ( $Platform -eq 'Auto' -and $IsMacOS ) { $Platform = 'MacOS' }
-    if ( $Platform -eq 'Auto' -and $IsLinux ) { $Platform = 'Linux' }
-    if ( $Platform -eq 'Auto' -and $IsWindows ) { $Platform = 'Windows' }
-    if ( $Platform -eq 'Auto' ) {
-        Write-Error 'Failed to detect platform!' -ErrorAction Stop
-    }
+    } else {
 
-    $TempPath = New-TemporaryFile | ForEach-Object { Rename-Item -Path $_.FullName -NewName $_.Name.Replace( $_.Extension, '.zip' ) -PassThru } | Convert-Path
+        Write-Warning "Downloading Bitwarden CLI v$ModuleVersion..."
 
-    $DownloadUri = 'https://vault.bitwarden.com/download/?app=cli&platform={0}' -f $Platform.ToLower()
+        $DownloadUri = "https://github.com/bitwarden/clients/releases/download/cli-v{0}/bw-{1}-{0}.zip" -f $ModuleVersion, $Platform.ToLower()
+        $DownloadPath = "$ModuleCacheFolder/bw-cli.zip"
     
-    Invoke-WebRequest -UseBasicParsing -Uri $DownloadUri -OutFile $TempPath
+        Invoke-WebRequest -UseBasicParsing -Uri $DownloadUri -OutFile $DownloadPath
 
-    Expand-Archive -Path $TempPath -DestinationPath $env:TEMP -Force
-    Remove-Item -Path $TempPath -Force -Confirm:$false -ErrorAction SilentlyContinue
-
-    Move-Item -Path "$env:TEMP\bw.exe" -Destination $Path -Force -Confirm:$false -ErrorAction Stop -Verbose
-    
-    $Script:BitwardenCLI = Get-Command "$Path\bw.exe" -CommandType Application -ErrorAction Stop
-
-}
-
-function Get-BitwardenCLI {
-    [CmdletBinding()]
-    [OutputType( [System.Management.Automation.ApplicationInfo] )]
-    param()
-
-    if ( -not $Script:BitwardenCLI ) {
-    
-        # check if we should use a specific bw.exe
-        if ( $env:BITWARDEN_CLI_PATH ) {
-            $Script:BitwardenCLI = Get-Command $env:BITWARDEN_CLI_PATH -CommandType Application -ErrorAction SilentlyContinue
+        Expand-Archive -Path $DownloadPath -DestinationPath $ModuleCacheFolder -Force
+        Remove-Item -Path $DownloadPath -Force -Confirm:$false -ErrorAction SilentlyContinue
+        Get-Item -Path $DefaultPath | Move-Item -Destination $TargetPath
+        if ( $Platform -ne 'Windows' ) {
+            chmod +x $TargetPath
         }
-        # otherwise we use whatever we can find on the path
-        else {
-            $Script:BitwardenCLI = Get-Command -Name bw -CommandType Application -ErrorAction SilentlyContinue
-        }
+    
+        $BitwardenCLI = Get-Command $TargetPath -CommandType Application -ErrorAction Stop
 
-    }
-
-    if ( $Script:BitwardenCLI ) {
-        return $Script:BitwardenCLI
-    }
-    else {
-        Write-Error "Bitwarden CLI is not installed!"
-        return
     }
 
 }
 
-function Test-BitwardenCLIVersionCurrent {
-    [CmdletBinding()]
-    param()
-
-    if ( -not $Script:ModuleVersion ) {
-        [version]$Script:ModuleVersion = Import-PowerShellDataFile -Path (Get-PSCallStack)[0].ScriptName.Replace('.psm1', '.psd1') -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ModuleVersion
-    }
-
-    [version]$CliVersion = bw --version --raw
-
-    $VersionIsCurrent = $CliVersion -ge $Script:ModuleVersion
-
-    if ( $VersionIsCurrent ) {
-        Write-Information ( 'Your Bitwarden CLI v{0} is current.' -f $CliVersion )
-    }
-    else {
-        Write-Warning ( 'Your Bitwarden CLI v{0} is out of date, please upgrade to at least v{1}.' -f $CliVersion, $ModuleVersion )
-    }
-
-    return $VersionIsCurrent
-
-}
+New-Alias -Name 'bw.exe' -Value $BitwardenCLI.Path
 
 function bw {
     <#
@@ -186,7 +105,7 @@ function bw {
     bw --help
     #>
 
-    $bw = Get-BitwardenCLI -ErrorAction Stop
+    $bw = $Script:BitwardenCLI
     
     [System.Collections.Generic.List[string]]$ArgumentsList = $args
 
@@ -349,8 +268,6 @@ function bw {
     }
 
 }
-
-New-Alias -Name 'bw.exe' -Value 'bw'
 
 Register-ArgumentCompleter -CommandName bw -ScriptBlock {
 
