@@ -12,7 +12,7 @@
 RootModule = 'BitwardenWrapper.psm1'
 
 # Version number of this module.
-ModuleVersion = '2024.2.1'
+ModuleVersion = '2024.3.1'
 
 # Supported PSEditions
 # CompatiblePSEditions = @()
@@ -129,4 +129,3 @@ PrivateData = @{
 # DefaultCommandPrefix = ''
 
 }
-
