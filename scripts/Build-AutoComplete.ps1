@@ -1,6 +1,7 @@
 #Requires -Version 7.0
-
 using namespace System.Collections.Generic
+
+param( [switch]$Clean )
 
 # enums: https://bitwarden.com/help/cli/#enums
 $BWEnums = @{
@@ -21,6 +22,11 @@ while ( -not( Test-Path -Path "$RepoRoot\.git" ) ) {
 $CurrentPlatform = Get-Variable -Name Is* | Where-Object { $_.Name -match '^Is(?<Platform>Windows|Linux|MacOS)$' -and $_.Value -eq $true } | ForEach-Object { $Matches.Platform.ToLower() }
 
 $CacheFolder = Join-Path $RepoRoot 'cache'
+
+if ( $Clean -and ( Test-Path $CacheFolder ) ) {
+    Remove-Item -Path $CacheFolder -Recurse -Force -ErrorAction Stop
+}
+
 New-Item -Path $CacheFolder -ItemType Directory -Force > $null
 
 $env:BITWARDENCLI_APPDATA_DIR = $CacheFolder
