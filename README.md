@@ -1,4 +1,5 @@
 # BitwardenWrapper
+
 Wrapper module for Bitwarden CLI bw.exe. Includes parameter completion and type juggling for output.
 
 ## Features
@@ -12,18 +13,25 @@ Wrapper module for Bitwarden CLI bw.exe. Includes parameter completion and type 
 * Installer function
 
 ## Installation
+
 Install from the PSGallery
+
 
 ```powershell
 Install-Module -Name BitwardenWrapper -Force
 ```
+
+_Note: Module only supprts x64 due to bw-cli support being limited to x64_
+
 ## Usage
+
 Loading the module should automatically install the matching bw-cli binary from Bitwarden's site.
 
 After loading you can use bw and bw.exe on Windows for auto-complete and object conversion, or bw-cli
 for original functionality with auto-complete only.
 
 ## Security
+
 To support auto-lock on Windows you can import a scheduled task that will lock bw-cli on workstation
 lock, or shutdown.
 
