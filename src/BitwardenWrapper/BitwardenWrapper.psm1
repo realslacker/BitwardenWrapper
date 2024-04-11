@@ -56,6 +56,12 @@ if ( -not $env:BITWARDENCLI_APPDATA_DIR ) {
 # allows sharing lock status across sessions
 $UnlockedFile = Join-Path $env:BITWARDENCLI_APPDATA_DIR '.unlocked'
 
+# file storing session key
+$SessionXmlPath = Join-Path $env:BITWARDENCLI_APPDATA_DIR 'session.xml'
+if ( -not( Test-Path Env:\BW_SESSION ) -and ( Test-Path $SessionXmlPath -PathType Leaf ) ) {
+    $env:BW_SESSION = (Import-Clixml -Path $SessionXmlPath).GetNetworkCredential().Password
+}
+
 # if a bw application exists in the Cache folder we'll use
 # that, otherwise use the version that matches this module
 $BitwardenCLI = Get-Command (Join-Path $ModuleCacheFolder 'bw') -CommandType Application -ErrorAction SilentlyContinue
@@ -100,7 +106,7 @@ if ( -not $BitwardenCLI ) {
 
 }
 
-New-Alias -Name 'bw.exe' -Value $BitwardenCLI.Path
+New-Alias -Name 'bw-cli' -Value $BitwardenCLI.Path
 
 function bw {
     <#
@@ -116,31 +122,11 @@ function bw {
 
         [System.Collections.Generic.List[string]]$ArgumentsList = $args
 
-        # configure session params
-        # precedence is: --session, $env:BW_SESSION, session.xml
-        $SessionParams = @()
-        if ( $ArgumentsList.Contains('--session') ) {
-            $SessionParamIndex = $ArgumentsList.IndexOf('--session')
-            $SessionParams = @(
-                '--session',
-                $ArgumentsList[ $SessionParamIndex + 1 ]
-            )
-            $ArgumentsList.RemoveRange( $SessionParamIndex, 2 )
-        } else {
-            $SessionXmlPath = Join-Path $env:BITWARDENCLI_APPDATA_DIR 'session.xml'
-            if ( -not( Test-Path Env:\BW_SESSION ) -and ( Test-Path $SessionXmlPath -PathType Leaf ) ) {
-                $SessionParams = @(
-                    '--session',
-                    (Import-Clixml -Path $SessionXmlPath).GetNetworkCredential().Password
-                )
-            }
-        }
-
         # run bw and capture result
         if ( $_ ) {
-            [string[]] $Result = $_ | & $Script:BitwardenCLI @SessionParams @ArgumentsList
+            [string[]] $Result = $_ | & $Script:BitwardenCLI @ArgumentsList
         } else {
-            [string[]] $Result = & $Script:BitwardenCLI @SessionParams @ArgumentsList
+            [string[]] $Result = & $Script:BitwardenCLI @ArgumentsList
         }
 
         # remove the .unlocked file if the command is lock
@@ -264,13 +250,10 @@ function bw {
 
                 New-Item $Script:UnlockedFile -Force > $null
 
-                $SessionParams = @(
-                    '--session',
-                    $Result[-1].Trim().Split(' ')[-1]
-                )
+                $env:BW_SESSION = $Result[-1].Trim().Split(' ')[-1]
 
                 # export session key into cache
-                [pscredential]::new( 'SessionKey', ( $SessionParams[1] | ConvertTo-SecureString -AsPlainText -Force) ) | Export-Clixml -Path $SessionXmlPath
+                [pscredential]::new( 'SessionKey', ( $env:BW_SESSION | ConvertTo-SecureString -AsPlainText -Force) ) | Export-Clixml -Path $Script:SessionXmlPath
 
                 $Result[0]
 
@@ -284,6 +267,10 @@ function bw {
 
     }
 
+}
+
+if ( $IsWindows ) {
+    New-Alias -Name 'bw.exe' -Value 'bw'
 }
 
 
@@ -359,6 +346,9 @@ $AutoCompleteScript = {
 }
 
 Register-ArgumentCompleter -CommandName bw -ScriptBlock $AutoCompleteScript
+Register-ArgumentCompleter -CommandName bw-cli -ScriptBlock $AutoCompleteScript
+
+# testing script, not exported by default
 New-Item -Path Function:\Test-BWAutoComplete -Value $AutoCompleteScript
 
 function Get-BWCredential {
