@@ -40,7 +40,8 @@ enum BitwardenOrganizationUserStatus {
     Confirmed       = 2
 }
 
-$ModuleCacheFolder = Join-Path '~' '.config' 'BitwardenWrapper'
+# NOTE: Cannot use 
+$ModuleCacheFolder = [IO.Path]::Combine( '~', '.config', 'BitwardenWrapper' )
 if ( -not( Test-Path -Path $ModuleCacheFolder ) ) {
     New-Item -Path $ModuleCacheFolder -ItemType Directory -ErrorAction Stop > $null
 }
@@ -48,23 +49,23 @@ if ( -not( Test-Path -Path $ModuleCacheFolder ) ) {
 if ( -not $env:BITWARDENCLI_APPDATA_DIR ) {
 
     # tell bitwarden where to store data
-    $env:BITWARDENCLI_APPDATA_DIR = Join-Path ( $ModuleCacheFolder | Resolve-Path | Convert-Path ) 'appdata'
+    $env:BITWARDENCLI_APPDATA_DIR = [IO.Path]::Combine( ( $ModuleCacheFolder | Resolve-Path | Convert-Path ), 'appdata' )
 
 }
 
 # file indication that bitwarden is unlocked
 # allows sharing lock status across sessions
-$UnlockedFile = Join-Path $env:BITWARDENCLI_APPDATA_DIR '.unlocked'
+$UnlockedFile = [IO.Path]::Combine( $env:BITWARDENCLI_APPDATA_DIR, '.unlocked' )
 
 # file storing session key
-$SessionXmlPath = Join-Path $env:BITWARDENCLI_APPDATA_DIR 'session.xml'
+$SessionXmlPath = [IO.Path]::Combine( $env:BITWARDENCLI_APPDATA_DIR, 'session.xml' )
 if ( -not( Test-Path Env:\BW_SESSION ) -and ( Test-Path $SessionXmlPath -PathType Leaf ) ) {
     $env:BW_SESSION = (Import-Clixml -Path $SessionXmlPath).GetNetworkCredential().Password
 }
 
 # if a bw application exists in the Cache folder we'll use
 # that, otherwise use the version that matches this module
-$BitwardenCLI = Get-Command (Join-Path $ModuleCacheFolder 'bw') -CommandType Application -ErrorAction SilentlyContinue
+$BitwardenCLI = Get-Command ([IO.Path]::Combine( $ModuleCacheFolder, 'bw' )) -CommandType Application -ErrorAction SilentlyContinue
 if ( -not $BitwardenCLI ) {
 
     $Platform = 'Unsupported'
@@ -75,10 +76,10 @@ if ( -not $BitwardenCLI ) {
         Write-Error "You appear to be using an unsupported platform. Please manually install a bw-cli binary into $ModuleCacheFolder." -ErrorAction Stop
     }
 
-    $ModuleVersion = (Import-PowerShellDataFile -Path (Join-Path $PSScriptRoot 'BitwardenWrapper.psd1')).ModuleVersion
+    $ModuleVersion = (Import-PowerShellDataFile -Path ([IO.Path]::Combine( $PSScriptRoot, 'BitwardenWrapper.psd1'))).ModuleVersion
 
-    $DefaultPath = Join-Path $ModuleCacheFolder ( 'bw' + ('','.exe')[$IsWindows] )
-    $TargetPath  = Join-Path $ModuleCacheFolder ( 'bw-v' + $ModuleVersion + ('','.exe')[$IsWindows] )
+    $DefaultPath = [IO.Path]::Combine( $ModuleCacheFolder, ( 'bw' + ('','.exe')[$IsWindows] ) )
+    $TargetPath  = [IO.Path]::Combine( $ModuleCacheFolder, ( 'bw-v' + $ModuleVersion + ('','.exe')[$IsWindows] ) )
 
     if ( Test-Path -Path $TargetPath ) {
 
@@ -89,7 +90,7 @@ if ( -not $BitwardenCLI ) {
         Write-Warning "Downloading Bitwarden CLI v$ModuleVersion..."
 
         $DownloadUri = "https://github.com/bitwarden/clients/releases/download/cli-v{0}/bw-{1}-{0}.zip" -f $ModuleVersion, $Platform.ToLower()
-        $DownloadPath = Join-Path $ModuleCacheFolder 'bw-cli.zip'
+        $DownloadPath = [IO.Path]::Combine( $ModuleCacheFolder, 'bw-cli.zip' )
     
         Invoke-WebRequest -UseBasicParsing -Uri $DownloadUri -OutFile $DownloadPath
 
