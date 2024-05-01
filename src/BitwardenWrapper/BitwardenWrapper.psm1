@@ -40,7 +40,11 @@ enum BitwardenOrganizationUserStatus {
     Confirmed       = 2
 }
 
-# NOTE: Cannot use 
+# the bw-cli version the module was built against
+# NOTE: The following line is updated programatically, do not change spacing
+[version] $BitwardenCLIVersion = '2024.3.1'
+
+# NOTE: Cannot use Join-Path with more than two arguments in PowerShell < 6.0
 $ModuleCacheFolder = [IO.Path]::Combine( '~', '.config', 'BitwardenWrapper' )
 if ( -not( Test-Path -Path $ModuleCacheFolder ) ) {
     New-Item -Path $ModuleCacheFolder -ItemType Directory -ErrorAction Stop > $null
@@ -69,6 +73,12 @@ $BitwardenCLI = Get-Command ([IO.Path]::Combine( $ModuleCacheFolder, 'bw' )) -Co
 if ( -not $BitwardenCLI ) {
 
     $Platform = 'Unsupported'
+    if ( $PSVersionTable.PSVersion -lt '6.0' ) {
+        # NOTE: only set on Windows PowerShell where this variable otherwise doesn't exist
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingCmdletAliases', '', Scope='Function')]
+        $IsWindows = $true
+        $Platform = 'Windows'
+    }
     if ( $IsMacOS   ) { $Platform = 'MacOS'   }
     if ( $IsLinux   ) { $Platform = 'Linux'   }
     if ( $IsWindows ) { $Platform = 'Windows' }
@@ -76,10 +86,8 @@ if ( -not $BitwardenCLI ) {
         Write-Error "You appear to be using an unsupported platform. Please manually install a bw-cli binary into $ModuleCacheFolder." -ErrorAction Stop
     }
 
-    $ModuleVersion = (Import-PowerShellDataFile -Path ([IO.Path]::Combine( $PSScriptRoot, 'BitwardenWrapper.psd1'))).ModuleVersion
-
     $DefaultPath = [IO.Path]::Combine( $ModuleCacheFolder, ( 'bw' + ('','.exe')[$IsWindows] ) )
-    $TargetPath  = [IO.Path]::Combine( $ModuleCacheFolder, ( 'bw-v' + $ModuleVersion + ('','.exe')[$IsWindows] ) )
+    $TargetPath  = [IO.Path]::Combine( $ModuleCacheFolder, ( 'bw-v' + $BitwardenCLIVersion + ('','.exe')[$IsWindows] ) )
 
     if ( Test-Path -Path $TargetPath ) {
 
@@ -87,9 +95,9 @@ if ( -not $BitwardenCLI ) {
 
     } else {
 
-        Write-Warning "Downloading Bitwarden CLI v$ModuleVersion..."
+        Write-Warning "Downloading Bitwarden CLI v$BitwardenCLIVersion..."
 
-        $DownloadUri = "https://github.com/bitwarden/clients/releases/download/cli-v{0}/bw-{1}-{0}.zip" -f $ModuleVersion, $Platform.ToLower()
+        $DownloadUri = "https://github.com/bitwarden/clients/releases/download/cli-v{0}/bw-{1}-{0}.zip" -f $BitwardenCLIVersion, $Platform.ToLower()
         $DownloadPath = [IO.Path]::Combine( $ModuleCacheFolder, 'bw-cli.zip' )
     
         Invoke-WebRequest -UseBasicParsing -Uri $DownloadUri -OutFile $DownloadPath
@@ -108,6 +116,11 @@ if ( -not $BitwardenCLI ) {
 }
 
 New-Alias -Name 'bw-cli' -Value $BitwardenCLI.Path
+
+[version] $BitwardenCLIVersionAvailable = & $BitwardenCLI --version
+if ( $BitwardenCLIVersionAvailable -lt $BitwardenCLIVersion ) {
+    Write-Warning ( 'The version of bw-cli is lower than the version tested with this module. Please update ''{0}'' to version {1}.' -f $BitwardenCLI.Path, $BitwardenCLIVersion )
+}
 
 function bw {
     <#
@@ -144,8 +157,13 @@ function bw {
         
         # try to parse the result as JSON
         try {
+
+            $DepthSplat = @{}
+            if ( (Get-Command ConvertFrom-Json).Parameters.ContainsKey('Depth') ) {
+                $DepthSplat.Depth = 99
+            }
         
-            [object[]]$JsonResult = $Result | ConvertFrom-Json -Depth 99 -ErrorAction SilentlyContinue
+            [object[]]$JsonResult = $Result | ConvertFrom-Json @DepthSplat -ErrorAction SilentlyContinue
             
         } catch {
         
@@ -280,6 +298,7 @@ $AutoCompleteScript = {
     param( $WordToComplete, $CommandAst, $CursorPosition )
 
     # Instantiate the AutoComplete configuration
+    # NOTE: The following line is updated programatically, do not change spacing
     $AutoCompleteJson = '{"Version":"2024.3.1","Switches":[{"Name":"--pretty","Values":null},{"Name":"--raw","Values":null},{"Name":"--response","Values":null},{"Name":"--cleanexit","Values":null},{"Name":"--quiet","Values":null},{"Name":"--nointeraction","Values":null},{"Name":"--session","Values":[""]},{"Name":"--version","Values":null},{"Name":"--help","Values":null}],"Commands":[{"Name":"login","Switches":[{"Name":"--method","Values":[0,1,3]},{"Name":"--code","Values":[""]},{"Name":"--sso","Values":null},{"Name":"--apikey","Values":null},{"Name":"--passwordenv","Values":[""]},{"Name":"--passwordfile","Values":[""]},{"Name":"--check","Values":null},{"Name":"--help","Values":null}],"Params":[{"Name":"email","Values":[""]},{"Name":"password","Values":[""]}]},{"Name":"logout","Switches":[{"Name":"--help","Values":null}],"Params":[]},{"Name":"lock","Switches":[{"Name":"--help","Values":null}],"Params":[]},{"Name":"unlock","Switches":[{"Name":"--check","Values":null},{"Name":"--passwordenv","Values":[""]},{"Name":"--passwordfile","Values":[""]},{"Name":"--help","Values":null}],"Params":[{"Name":"password","Values":[""]}]},{"Name":"sync","Switches":[{"Name":"--force","Values":null},{"Name":"--last","Values":null},{"Name":"--help","Values":null}],"Params":[]},{"Name":"generate","Switches":[{"Name":"--uppercase","Values":null},{"Name":"--lowercase","Values":null},{"Name":"--number","Values":null},{"Name":"--special","Values":null},{"Name":"--passphrase","Values":null},{"Name":"--length","Values":[""]},{"Name":"--words","Values":[""]},{"Name":"--minNumber","Values":[""]},{"Name":"--minSpecial","Values":[""]},{"Name":"--separator","Values":[""]},{"Name":"--capitalize","Values":null},{"Name":"--includeNumber","Values":null},{"Name":"--ambiguous","Values":null},{"Name":"--help","Values":null}],"Params":[]},{"Name":"encode","Switches":[{"Name":"--help","Values":null}],"Params":[]},{"Name":"config","Switches":[{"Name":"--api","Values":[""]},{"Name":"--identity","Values":[""]},{"Name":"--icons","Values":[""]},{"Name":"--notifications","Values":[""]},{"Name":"--events","Values":[""]},{"Name":"--help","Values":null}],"Params":[{"Name":"setting","Values":[""]},{"Name":"value","Values":[""]}]},{"Name":"update","Switches":[{"Name":"--help","Values":null}],"Params":[]},{"Name":"completion","Switches":[{"Name":"--shell","Values":"zsh"},{"Name":"--help","Values":null}],"Params":[]},{"Name":"status","Switches":[{"Name":"--help","Values":null}],"Params":[]},{"Name":"serve","Switches":[{"Name":"--hostname","Values":[""]},{"Name":"--port","Values":[""]},{"Name":"--help","Values":null}],"Params":[]},{"Name":"list","Switches":[{"Name":"--search","Values":[""]},{"Name":"--url","Values":[""]},{"Name":"--folderid","Values":[""]},{"Name":"--collectionid","Values":[""]},{"Name":"--organizationid","Values":[""]},{"Name":"--trash","Values":null},{"Name":"--help","Values":null}],"Params":[{"Name":"object","Values":["items","folders","collections","org-collections","org-members","organizations"]}]},{"Name":"get","Switches":[{"Name":"--itemid","Values":[""]},{"Name":"--output","Values":[""]},{"Name":"--organizationid","Values":[""]},{"Name":"--help","Values":null}],"Params":[{"Name":"object","Values":["item","username","password","uri","totp","notes","exposed","attachment","folder","collection","org-collection","organization","template","fingerprint","send"]},{"Name":"id","Values":[""]}]},{"Name":"create","Switches":[{"Name":"--file","Values":[""]},{"Name":"--itemid","Values":[""]},{"Name":"--organizationid","Values":[""]},{"Name":"--help","Values":null}],"Params":[{"Name":"object","Values":["item","attachment","folder","org-collection"]},{"Name":"encodedJson","Values":[""]}]},{"Name":"edit","Switches":[{"Name":"--organizationid","Values":[""]},{"Name":"--help","Values":null}],"Params":[{"Name":"object","Values":["item","item-collections","folder","org-collection"]},{"Name":"id","Values":[""]},{"Name":"encodedJson","Values":[""]}]},{"Name":"delete","Switches":[{"Name":"--itemid","Values":[""]},{"Name":"--organizationid","Values":[""]},{"Name":"--permanent","Values":null},{"Name":"--help","Values":null}],"Params":[{"Name":"object","Values":["item","attachment","folder","org-collection"]},{"Name":"id","Values":[""]}]},{"Name":"restore","Switches":[{"Name":"--help","Values":null}],"Params":[{"Name":"object","Values":["item"]},{"Name":"id","Values":[""]}]},{"Name":"move","Switches":[{"Name":"--help","Values":null}],"Params":[{"Name":"id","Values":[""]},{"Name":"organizationId","Values":[""]},{"Name":"encodedJson","Values":[""]}]},{"Name":"confirm","Switches":[{"Name":"--organizationid","Values":[""]},{"Name":"--help","Values":null}],"Params":[{"Name":"object","Values":["org-member"]},{"Name":"id","Values":[""]}]},{"Name":"import","Switches":[{"Name":"--formats","Values":null},{"Name":"--organizationid","Values":[""]},{"Name":"--help","Values":null}],"Params":[{"Name":"format","Values":[""]},{"Name":"input","Values":[""]}]},{"Name":"export","Switches":[{"Name":"--output","Values":[""]},{"Name":"--format","Values":["csv","json"]},{"Name":"--password","Values":[""]},{"Name":"--organizationid","Values":[""]},{"Name":"--help","Values":null}],"Params":[]},{"Name":"share","Switches":[{"Name":"--help","Values":null}],"Params":[{"Name":"id","Values":[""]},{"Name":"organizationId","Values":[""]},{"Name":"encodedJson","Values":[""]}]},{"Name":"send","Switches":[{"Name":"--file","Values":null},{"Name":"--deleteInDays","Values":[""]},{"Name":"--maxAccessCount","Values":[""]},{"Name":"--hidden","Values":null},{"Name":"--name","Values":[""]},{"Name":"--notes","Values":[""]},{"Name":"--fullObject","Values":null},{"Name":"--help","Values":null}],"Params":[{"Name":"command","Values":[""]},{"Name":"data","Values":[""]}]},{"Name":"receive","Switches":[{"Name":"--password","Values":[""]},{"Name":"--passwordenv","Values":[""]},{"Name":"--passwordfile","Values":[""]},{"Name":"--obj","Values":null},{"Name":"--output","Values":[""]},{"Name":"--help","Values":null}],"Params":[{"Name":"url","Values":[""]}]},{"Name":"help","Switches":[{"Name":"--pretty","Values":null},{"Name":"--raw","Values":null},{"Name":"--response","Values":null},{"Name":"--cleanexit","Values":null},{"Name":"--quiet","Values":null},{"Name":"--nointeraction","Values":null},{"Name":"--session","Values":[""]},{"Name":"--version","Values":null},{"Name":"--help","Values":null}],"Params":[]}]}'
     $AutoCompleteConfiguration = $AutoCompleteJson | ConvertFrom-Json -Depth 99
 

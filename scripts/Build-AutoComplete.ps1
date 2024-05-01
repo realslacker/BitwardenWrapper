@@ -152,17 +152,20 @@ $JsonConfig = $Config | ConvertTo-Json -Depth 99 -Compress
 
 $ModulePath = Join-Path $RepoRoot 'src' 'BitwardenWrapper'
 $ModuleFile = Join-Path $ModulePath 'BitwardenWrapper.psm1'
-$ManifestFile = Join-Path $ModulePath 'BitwardenWrapper.psd1'
+#$ManifestFile = Join-Path $ModulePath 'BitwardenWrapper.psd1'
 
 Write-Host 'Updating module...'
 
-$ModuleContent = Get-Content -Path $ModuleFile
+[string[]] $ModuleContent = Get-Content -Path $ModuleFile
+$ModuleContent | Where-Object { $_ -match '^(\[version\] \$BitwardenCLIVersion = )' } | ForEach-Object {
+    $ModuleContent[$ModuleContent.IndexOf($_)] = $Matches[1] + "'$BitwardenCLIVersion'"
+}
 $ModuleContent | Where-Object { $_ -match '^(\s+\$AutoCompleteJson = )' } | ForEach-Object {
-    $LineIndex = $ModuleContent.IndexOf($_)
-    $ModuleContent[$LineIndex] = $Matches[1] + "'$JsonConfig'"
+    $ModuleContent[$ModuleContent.IndexOf($_)] = $Matches[1] + "'$JsonConfig'"
 }
 $ModuleContent | Set-Content -Path $ModuleFile
 
+<#
 Write-Host 'Updating manifest...'
 
 $ManifestContent = Get-Content -Path $ManifestFile
@@ -171,5 +174,6 @@ $ManifestContent | Where-Object { $_ -match '^(ModuleVersion = )' } | ForEach-Ob
     $ManifestContent[$LineIndex] = $Matches[1] + "'$BitwardenCLIVersion'"
 }
 $ManifestContent | Set-Content -Path $ManifestFile
+#>
 
 Write-Host 'Done'
